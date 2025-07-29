@@ -1,0 +1,11 @@
+# Core
+numpy
+pandas
+scipy
+
+# Config handling
+pyyaml
+
+# Plotting
+matplotlib
+seaborn

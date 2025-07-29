@@ -1,0 +1,14 @@
+input_dir: Data/raw
+cleaned_dir: Data/cleaned
+output_dir: output
+
+z_score_threshold: 2.5
+spike_threshold_multiplier: 4
+noise_threshold: 0.001
+max_valid_snr: 1000
+
+duration: 10
+plot_start_time: 0
+downsample_factor: 50
+channels_per_plot: 6
+
