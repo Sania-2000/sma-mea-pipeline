@@ -1,98 +1,90 @@
 # SMA-MEA Feature Extraction Pipeline
 
-This project provides a fully automated pipeline for processing microelectrode array (MEA) recordings from iPSC-derived neuromuscular junctions, with a focus on distinguishing **Spinal Muscular Atrophy (SMA)** from healthy controls.
+This repository provides a fully automated pipeline for analyzing microelectrode array (MEA) recordings from iPSC-derived neuromuscular junctions, focused on identifying key neural features for distinguishing Spinal Muscular Atrophy (SMA) from healthy controls.
 
 ---
 
-## Key Features
+## Features
 
-- **Signal cleaning** with artifact removal
-- **Spike detection** using adaptive thresholding
-- **SNR analysis** per channel
-- **Feature extraction** (ISI, burst stats, amplitude, etc.)
--  Organized output folders and diagnostic plots
+- Signal cleaning with artifact detection and interpolation
+- Spike detection using adaptive thresholds
+- SNR (Signal-to-Noise Ratio) analysis
+- Extraction of features including:
+  - Firing rate
+  - ISI (inter-spike intervals)
+  - Bursts
+  - Spike amplitude
+- Organized, reproducible output structure
+- Configurable via `config.yaml`
 
 ---
 
-##  Folder Structure
+## Repository Structure
 
 SMA_PIPELINE/
 ├── config/
-│ └── config.yaml # Pipeline parameters (e.g. thresholds)
+│ └── config.yaml # Pipeline parameters (thresholds, settings)
 ├── data/
-│ ├── raw/ # Your input .csv files (recordings)
-│ └── cleaned/ # Cleaned versions after artifact removal
+│ ├── raw/ # Input .csv files
+│ └── cleaned/ # Output after signal cleaning
 ├── output/
-│ ├── cleaned_plots/ #  Cleaned signal preview plots
+│ ├── cleaned_plots/ # Plots of cleaned signals
 │ ├── spike/
-│ │ ├── data/ # Spike stats, .csv and .txt
-│ │ └── plots/ # Spike visualization
-│ ├── snr/ # SNR results per channel
-│ └── features/ # Final extracted features (CSV)
-├── mea_pipeline/ # Main logic modules
-│ ├── cleaner.py # Handles signal cleaning and artifact interpolation
-│ ├── spikes.py # Spike detection logic
-│ ├── snr.py # Signal-to-noise ratio calculation
-│ ├── features.py # Extracts neural features like ISI, bursts
-│ ├── plotting.py # All plot utilities in one place
-│ └── pipeline.py # Glue code: runs all steps in order
-├── run_pipeline.py # Entry-point to run the full pipeline
-├── requirements.txt # All Python dependencies
+│ │ ├── data/ # Spike metrics (.csv, .txt)
+│ │ └── plots/ # Spike detection plots
+│ ├── snr/ # SNR results
+│ └── features/ # Final feature summaries
+├── mea_pipeline/ # Core processing modules
+│ ├── cleaner.py # Signal cleaning
+│ ├── spikes.py # Spike detection
+│ ├── snr.py # SNR calculation
+│ ├── features.py # Feature extraction
+│ ├── plotting.py # All plotting utilities
+│ └── pipeline.py # Pipeline controller
+├── run_pipeline.py # Entry-point script
+├── requirements.txt # Python dependencies
 └── README.md # This file
-
-
----
-
 ## Quickstart
 
-### 1. Install Dependencies
-
+### Install Requirements
 pip install -r requirements.txt
-Required: Python ≥ 3.8, numpy, pandas, matplotlib, seaborn, PyYAML
-
-2. Add Your Data
-Place your .csv files into:
-data/raw/
+### Usage
+### 1. Prepare Input Data
+Place your .csv recordings inside the data/raw/ directory.
 Each file must contain:
+A timestamps column in seconds
+One or more signal channels with names like:
+highpass_A-001_values, highpass_B-005_values, etc.
 
-timestamps column (in seconds)
-Signal channels named like highpass_A-001_values, etc.
-
-3. Run the Pipeline
+### 2. Run the Pipeline
+From the project root directory:
 python run_pipeline.py
-This runs:
+This will
+Clean signals
+Detect spikes
+Calculate SNR
+Extract features
+### All results are saved under the output/ directory.
+Output Summary
+Output File/Folder	Description
+data/cleaned/	Cleaned signal CSVs
+output/cleaned_plots/	Signal cleaning visualizations
+output/spike/data/	Spike metrics for each channel
+output/spike/plots/	Spike detection overlays
+output/snr/	Per-channel SNR results
+output/features/features_summary.csv	Comprehensive feature table
 
-cleaner.py: removes dead channels & artifacts
-
-spikes.py: detects spikes above adaptive threshold
-
-snr.py: calculates mean spike-to-noise ratio
-
-features.py: computes burst, firing rate, amplitude
-
-All plots + CSVs are saved in /output/
-
-Outputs
-Output	Format	Location
-Cleaned signal CSVs	.csv	data/cleaned/
-Cleaned plots	.png	output/cleaned_plots/
-Spike summaries	.txt	output/spike/data/
-Spike detection plots	.png	output/spike/plots/
-SNR values per channel	.csv	output/snr/
-Full feature table	.csv	output/features/features_summary.csv
-
-Configuration (config/config.yaml)
-You can tune:
-
-z_score_threshold: 3.0              # Artifact detection sensitivity
-spike_threshold_multiplier: 4       # For spike detection threshold
-noise_threshold: 0.001              # For SNR filter
+### Configuration
+All parameters can be customized in config/config.yaml. Example:
+z_score_threshold: 3.0
+spike_threshold_multiplier: 4
+noise_threshold: 0.001
 max_valid_snr: 1000
 channels_per_plot: 6
 duration: 10
 plot_start_time: 0
 downsample_factor: 50
-
-Author
+dead_channels: []
+### Author
 Sania Fatima
-M1 Genomics — IGMM Internship 2024
+M1 Genomics – IGMM Internship, 2024
