@@ -26,6 +26,7 @@ def extract_features():
         if not fname.endswith("_cleaned.csv"):
             continue
 
+        print(f"Processing file: {fname}")
         base = fname.replace("_cleaned.csv", "")
         file_path = os.path.join(input_dir, fname)
         df = pd.read_csv(file_path)
@@ -33,7 +34,6 @@ def extract_features():
         duration = timestamps[-1] - timestamps[0]
         channels = [c for c in df.columns if c != "timestamps"]
 
-        # Load SNR data
         snr_path = os.path.join(snr_dir, f"{base}_snr.csv")
         snr_data = pd.read_csv(snr_path) if os.path.exists(snr_path) else pd.DataFrame()
 
@@ -45,7 +45,6 @@ def extract_features():
             spike_times = timestamps[spike_indices]
             isis = np.diff(spike_times)
 
-            # Burst detection
             bursts = []
             current = []
 
@@ -87,18 +86,11 @@ def extract_features():
                 "snr": snr_val
             })
 
-            #  Only plot the first channel per file
-            if ch == channels[0]:
-                plot_path = os.path.join(plot_dir, f"{base}_{ch}_features.png")
-                plot_spikes(
-                    timestamps=timestamps,
-                    signal=signal,
-                    spike_indices=spike_indices,
-                    threshold=threshold,
-                    title=f"{base} – {ch}",
-                    out_path=plot_path
-                )
+    print(f" Total features extracted: {len(all_features)}")
 
-    df_out = pd.DataFrame(all_features)
-    df_out.to_csv(os.path.join(output_dir, "features_summary.csv"), index=False)
-    print("✔ Full feature extraction completed.")
+    if all_features:
+        df_out = pd.DataFrame(all_features)
+        df_out.to_csv(os.path.join(output_dir, "features_summary.csv"), index=False)
+        print("features_summary.csv written.")
+    else:
+        print(" No features extracted! Check cleaned files and thresholds.")
