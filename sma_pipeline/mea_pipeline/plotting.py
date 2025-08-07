@@ -84,3 +84,37 @@ def plot_group_means_barplot(mean_csv_path, out_path):
     plt.savefig(out_path)
     plt.close()
     print(f"Saved mean comparison plot: {out_path}")
+def plot_feature_summary_bars(summary_csv_path, out_dir):
+    df = pd.read_csv(summary_csv_path)
+    if df.empty:
+        print("⚠ No feature data to plot.")
+        return
+
+    os.makedirs(out_dir, exist_ok=True)
+    feature_keys = [col for col in df.columns if "_count" in col or "_rate" in col or "_isi_" in col]
+
+    feature_groups = {
+        "Spike Count": [k for k in feature_keys if "_count" in k],
+        "Firing Rate": [k for k in feature_keys if "_rate" in k],
+        "ISI Mean": [k for k in feature_keys if "_isi_mean" in k],
+        "ISI Std": [k for k in feature_keys if "_isi_std" in k],
+    }
+
+    for label, cols in feature_groups.items():
+        if not cols:
+            continue
+
+        values = df[cols].iloc[0]
+        channels = [c.replace("_count", "").replace("_rate", "").replace("_isi_mean", "").replace("_isi_std", "") for c in cols]
+
+        plt.figure(figsize=(12, 4))
+        plt.bar(channels, values)
+        plt.title(f"{label} per Channel")
+        plt.xlabel("Channel")
+        plt.ylabel(label)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        path = os.path.join(out_dir, f"{label.replace(' ', '_').lower()}.png")
+        plt.savefig(path)
+        plt.close()
+        print(f" Saved: {path}")
