@@ -2,66 +2,64 @@ import os
 import pandas as pd
 import numpy as np
 import yaml
-from mea_pipeline.plotting import plot_spikes
 
 def load_config():
     with open("config/config.yaml", "r") as f:
-        cfg = yaml.safe_load(f)
-        cfg["spike_threshold_multiplier"] = float(cfg["spike_threshold_multiplier"])
-        return cfg
+        return yaml.safe_load(f)
 
 def detect_spikes():
     cfg = load_config()
-    input_dir = cfg["cleaned_dir"]
-    data_dir = os.path.join("output", "spike", "data")
-    plot_dir = os.path.join("output", "spike", "plots")
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(plot_dir, exist_ok=True)
+
+    input_dir = os.path.join(cfg["output_dir"], "cleaned")
+    raw_out_dir = os.path.join(cfg["output_dir"], "spike", "data")
+    data_out_dir = os.path.join(cfg["output_dir"], "spike", "values")
+    os.makedirs(raw_out_dir, exist_ok=True)
+    os.makedirs(data_out_dir, exist_ok=True)
+
+    threshold_multiplier = float(cfg["spike_threshold_multiplier"])
 
     for filename in sorted(os.listdir(input_dir)):
-        if not filename.endswith("_cleaned.csv"):
+        if not filename.endswith(".csv"):
             continue
 
+        print(f"Detecting spikes in: {filename}")
         filepath = os.path.join(input_dir, filename)
         df = pd.read_csv(filepath)
-        if "timestamps" not in df.columns:
-            continue
+        timestamps = df["timestamps"].values
 
-        timestamps = df["timestamps"]
-        cleaned_signals = df.drop(columns=["timestamps"])
-        abs_signals = cleaned_signals.abs()
-        stats_raw = {}
+        spike_report = []
+        spike_df = pd.DataFrame({"timestamps": timestamps})
 
-        for col in abs_signals.columns:
-            signal = abs_signals[col]
-            threshold = signal.mean() + cfg["spike_threshold_multiplier"] * signal.std()
-            spike_mask = signal > threshold
-            spikes = signal[spike_mask]
+        for ch in df.columns[1:]:
+            signal = df[ch].values
+            abs_signal = np.abs(signal)
 
-            stats_raw[col] = {
-                "spike_count": spike_mask.sum(),
-                "max_amplitude": spikes.max() if not spikes.empty else 0.0,
-                "mean_spike": spikes.mean() if not spikes.empty else 0.0,
-                "spike_indices": spikes.index.tolist()
-            }
+            mean = np.mean(abs_signal)
+            std = np.std(abs_signal)
+            threshold = mean + threshold_multiplier * std
 
-        base = os.path.splitext(filename)[0].replace("_cleaned", "").replace("_CLEANED", "")
-        abs_out = abs_signals.copy()
-        abs_out.insert(0, "timestamps", timestamps)
-        abs_out.to_csv(os.path.join(data_dir, f"{base}_abs.csv"), index=False)
+            spike_mask = abs_signal > threshold
+            spike_times = timestamps[spike_mask]
+            spike_amplitudes = signal[spike_mask]
 
-        with open(os.path.join(data_dir, f"{base}_spikes_raw.txt"), "w") as f:
-            for ch, data in stats_raw.items():
-                f.write(f"{ch}\tSpikes: {data['spike_count']}\tMax Amplitude: {data['max_amplitude']:.3f}\t"
-                        f"Mean Amplitude: {data['mean_spike']:.3f}\n")
+            spike_df[ch] = spike_mask.astype(int)
 
-        sample_col = abs_signals.columns[0]
-        s = abs_signals[sample_col]
-        ixs = stats_raw[sample_col]["spike_indices"]
-        thresh = s.mean() + cfg["spike_threshold_multiplier"] * s.std()
+            spike_count = len(spike_times)
+            max_amp = np.max(spike_amplitudes) if spike_count > 0 else 0
+            mean_amp = np.mean(np.abs(spike_amplitudes)) if spike_count > 0 else 0
 
-        plot_spikes(
-            timestamps, s, ixs, thresh,
-            f"{base} – {sample_col}",
-            os.path.join(plot_dir, f"{base}_spikes_sample.png")
-        )
+            spike_report.append(
+                f"{ch}\tSpike count: {spike_count}\tMax amp: {max_amp:.4f}\tMean amp: {mean_amp:.4f}"
+            )
+
+       
+        csv_out = os.path.join(data_out_dir, filename.replace(".csv", "_spikes.csv"))
+        spike_df.to_csv(csv_out, index=False)
+
+      
+        txt_out = os.path.join(raw_out_dir, filename.replace(".csv", "_spikes_raw.txt"))
+        with open(txt_out, "w") as f:
+            f.write("\n".join(spike_report))
+
+        print(f"Saved spike mask: {csv_out}")
+        print(f"Saved summary log: {txt_out}")
