@@ -1,62 +1,80 @@
 import os
 import pandas as pd
-from mea_pipeline.plotting import (
-    plot_group_feature_boxplot,
-    plot_group_means_barplot
-)
+import numpy as np
+import yaml
+from mea_pipeline.plotting import plot_group_feature_boxplot
 
+def load_config():
+    with open("config/config.yaml", "r") as f:
+        return yaml.safe_load(f)
 
-def assign_group(row):
-    ch = row["channel"].lower()
-    if ch.startswith("highpass_a-") or ch.startswith("highpass_b-"):
+def extract_channel_id(colname):
+    # Example: highpass_A-001_values → A-001
+    parts = colname.split("_")
+    for p in parts:
+        if "-" in p:
+            return p
+    return colname
+
+def get_channel_group(channel_id):
+    if channel_id.startswith("A") or channel_id.startswith("B"):
         return "SMA"
-    elif ch.startswith("highpass_c-") or ch.startswith("highpass_d-"):
+    elif channel_id.startswith("C") or channel_id.startswith("D"):
         return "Healthy"
     else:
         return "Unknown"
 
-def run_feature_comparison(
-    input_csv="output/features/features_summary.csv",
-    grouped_csv="output/features/grouped_feature_summary.csv",
-    mean_csv="output/features/group_means.csv",
-    plot_dir="output/features/plots/group_comparison"
-):
-   
-    df = pd.read_csv(input_csv)
-    print(f"Loaded {len(df)} rows from features_summary.csv")
+def run_feature_comparison():
+    cfg = load_config()
 
+    spike_dir = os.path.join(cfg["output_dir"], "spike", "values")
+    output_dir = os.path.join(cfg["output_dir"], "features")
+    os.makedirs(output_dir, exist_ok=True)
 
-    df["group"] = df.apply(assign_group, axis=1)
-    df = df[df["group"].isin(["SMA", "Healthy"])]
-    print(f"Grouped rows: {df['group'].value_counts().to_dict()}")
+    all_channel_features = []
 
-  
-    os.makedirs(os.path.dirname(grouped_csv), exist_ok=True)
-    df.to_csv(grouped_csv, index=False)
-    print(f"Grouped CSV saved to: {grouped_csv}")
+    for filename in sorted(os.listdir(spike_dir)):
+        if not filename.endswith("_spikes.csv"):
+            continue
 
-  
-    feature_cols = [
-        "spike_count", "firing_rate_hz", "mean_isi", "cv_isi",
-        "burst_count", "mean_burst_duration", "mean_spikes_per_burst",
-        "max_amplitude", "mean_amplitude", "snr"
-    ]
+        filepath = os.path.join(spike_dir, filename)
+        df = pd.read_csv(filepath)
+        timestamps = df["timestamps"].values
+        duration = timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 1
 
+        for col in df.columns[1:]:
+            channel_id = extract_channel_id(col)
+            group = get_channel_group(channel_id)
 
-    group_means = df.groupby("group")[feature_cols].mean().transpose()
-    group_means.columns = [f"{g}_Mean" for g in group_means.columns]
-    group_means.reset_index(inplace=True)
-    group_means.rename(columns={"index": "Feature"}, inplace=True)
-    group_means.to_csv(mean_csv, index=False)
-    print(f" Group means saved to: {mean_csv}")
+            spikes = df[col].values
+            spike_times = timestamps[spikes == 1]
 
-  
-    os.makedirs(plot_dir, exist_ok=True)
-    for feature in feature_cols:
-        if feature in df.columns:
-            out_path = os.path.join(plot_dir, f"{feature}_group_boxplot.png")
+            spike_count = len(spike_times)
+            firing_rate = spike_count / duration if duration > 0 else 0
+            isi = np.diff(spike_times)
+            mean_isi = np.mean(isi) if len(isi) > 0 else 0
+            std_isi = np.std(isi) if len(isi) > 0 else 0
+
+            all_channel_features.append({
+                "file": filename,
+                "channel": channel_id,
+                "group": group,
+                "spike_count": spike_count,
+                "firing_rate": firing_rate,
+                "isi_mean": mean_isi,
+                "isi_std": std_isi
+            })
+
+    summary_csv = os.path.join(output_dir, "features_summary.csv")
+
+    if all_channel_features:
+        df = pd.DataFrame(all_channel_features)
+        df.to_csv(summary_csv, index=False)
+        print(f"Feature summary saved: {summary_csv}")
+        print(f"Total channel-feature rows: {len(df)}")
+
+        for feature in ["spike_count", "firing_rate", "isi_mean", "isi_std"]:
+            out_path = os.path.join(output_dir, f"{feature}_boxplot.png")
             plot_group_feature_boxplot(df, feature, out_path)
-
-  
-    mean_plot_path = os.path.join(plot_dir, "group_mean_barplot.png")
-    plot_group_means_barplot(mean_csv, mean_plot_path)
+    else:
+        print("No features extracted! Check spike CSVs.")
