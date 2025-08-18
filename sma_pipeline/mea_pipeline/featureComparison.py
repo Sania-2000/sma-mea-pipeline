@@ -9,7 +9,6 @@ def load_config():
         return yaml.safe_load(f)
 
 def extract_channel_id(colname):
-    # Example: highpass_A-001_values → A-001
     parts = colname.split("_")
     for p in parts:
         if "-" in p:
