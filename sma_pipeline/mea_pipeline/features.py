@@ -2,95 +2,88 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
-from mea_pipeline.plotting import plot_spikes
 
-def extract_features():
-    input_dir = "Data/cleaned"
-    snr_dir = "output/snr"
-    output_dir = "output/features"
-    plot_dir = os.path.join(output_dir, "plots")
-
+def extract_features(output_dir="output/features", cleaned_dir="output/cleaned", fs=30000, thresh_mult=4, burst_isi=0.1):
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(plot_dir, exist_ok=True)
+    all_results = []
 
-    FS = 30303.03
-    THRESHOLD_STD = 7
-    MIN_SPIKE_INTERVAL = 0.001
-    BURST_END_MAX_INTERVAL = 0.2
-    MIN_BURST_DURATION = 0.5
-    MIN_SPIKES_PER_BURST = 5
-
-    all_features = []
-
-    for fname in sorted(os.listdir(input_dir)):
+    for fname in sorted(os.listdir(cleaned_dir)):
         if not fname.endswith("_cleaned.csv"):
             continue
 
-        print(f"Processing file: {fname}")
-        base = fname.replace("_cleaned.csv", "")
-        file_path = os.path.join(input_dir, fname)
-        df = pd.read_csv(file_path)
-        timestamps = df["timestamps"].to_numpy()
-        duration = timestamps[-1] - timestamps[0]
-        channels = [c for c in df.columns if c != "timestamps"]
+        cleaned_file = os.path.join(cleaned_dir, fname)
+        df = pd.read_csv(cleaned_file)
+        if "timestamps" not in df.columns:
+            continue
 
-        snr_path = os.path.join(snr_dir, f"{base}_snr.csv")
-        snr_data = pd.read_csv(snr_path) if os.path.exists(snr_path) else pd.DataFrame()
+        timestamps = df["timestamps"].values
+        ts_sec = timestamps if timestamps[1] - timestamps[0] < 1 else timestamps / fs
+        duration = ts_sec[-1] - ts_sec[0]
 
-        for ch in channels:
-            signal = df[ch].to_numpy()
-            threshold = THRESHOLD_STD * np.std(signal)
-            min_samples = int(MIN_SPIKE_INTERVAL * FS)
-            spike_indices, _ = find_peaks(signal, height=threshold, distance=min_samples)
-            spike_times = timestamps[spike_indices]
-            isis = np.diff(spike_times)
+        all_signals = df.drop(columns=["timestamps"]).values.flatten()
+        global_noise_std = np.std(all_signals)
+        global_threshold = thresh_mult * global_noise_std
+
+        for col in df.columns:
+            if col == "timestamps":
+                continue
+
+            signal = df[col].values
+
+            pos_peaks, _ = find_peaks(signal, height=global_threshold, distance=int(0.001 * fs))
+            neg_peaks, _ = find_peaks(-signal, height=global_threshold, distance=int(0.001 * fs))
+            spike_idx = np.sort(np.concatenate([pos_peaks, neg_peaks]))
+
+            spike_times = ts_sec[spike_idx]
+            spike_count = len(spike_times)
+            firing_rate = spike_count / duration if duration > 0 else np.nan
+
+            isi = np.diff(spike_times)
+            isi_mean = np.mean(isi) if len(isi) > 0 else np.nan
 
             bursts = []
-            current = []
-
-            for i in range(len(spike_times)):
-                if not current:
-                    current.append(spike_times[i])
-                else:
-                    interval = spike_times[i] - spike_times[i - 1]
-                    if interval <= BURST_END_MAX_INTERVAL:
-                        current.append(spike_times[i])
+            if len(isi) > 0:
+                current_burst = [spike_times[0]]
+                for i in range(1, len(spike_times)):
+                    if (spike_times[i] - spike_times[i-1]) <= burst_isi:
+                        current_burst.append(spike_times[i])
                     else:
-                        if len(current) >= MIN_SPIKES_PER_BURST and (current[-1] - current[0]) >= MIN_BURST_DURATION:
-                            bursts.append(current)
-                        current = [spike_times[i]]
+                        if len(current_burst) > 1:
+                            bursts.append(current_burst)
+                        current_burst = [spike_times[i]]
+                if len(current_burst) > 1:
+                    bursts.append(current_burst)
 
-            if current and len(current) >= MIN_SPIKES_PER_BURST and (current[-1] - current[0]) >= MIN_BURST_DURATION:
-                bursts.append(current)
+            burst_count = len(bursts)
+            mean_spikes_per_burst = np.mean([len(b) for b in bursts]) if burst_count > 0 else np.nan
 
-            burst_durations = [b[-1] - b[0] for b in bursts]
-            spikes_per_burst = [len(b) for b in bursts]
-            amplitudes = signal[spike_indices] if len(spike_indices) > 0 else []
-            snr_row = snr_data[snr_data["channel"] == ch]
-            snr_val = snr_row["SNR"].values[0] if not snr_row.empty else None
+            group = "Healthy" if col.startswith(("highpass_C", "highpass_D")) else "SMA"
 
-            all_features.append({
-                "chunk": base,
-                "channel": ch,
-                "duration_sec": duration,
-                "spike_count": len(spike_indices),
-                "firing_rate_hz": len(spike_indices) / duration if duration > 0 else 0,
-                "mean_isi": np.mean(isis) if len(isis) > 0 else np.nan,
-                "median_isi": np.median(isis) if len(isis) > 0 else np.nan,
-                "cv_isi": np.std(isis) / np.mean(isis) if len(isis) > 1 and np.mean(isis) > 0 else np.nan,
-                "burst_count": len(bursts),
-                "mean_burst_duration": np.mean(burst_durations) if burst_durations else np.nan,
-                "mean_spikes_per_burst": np.mean(spikes_per_burst) if spikes_per_burst else np.nan,
-                "max_amplitude": np.max(amplitudes) if len(amplitudes) > 0 else np.nan,
-                "mean_amplitude": np.mean(amplitudes) if len(amplitudes) > 0 else np.nan,
-                "snr": snr_val
+        
+            if firing_rate > 100 or (isi_mean is not np.nan and isi_mean < 0.002):
+                continue
+
+            all_results.append({
+                "file": fname,
+                "channel": col,
+                "spike_count": spike_count,
+                "firing_rate": firing_rate,
+                "isi_mean": isi_mean,
+                "burst_count": burst_count,
+                "mean_spikes_per_burst": mean_spikes_per_burst,
+                "group": group
             })
 
-    print(f" Total features extracted: {len(all_features)}")
+    if not all_results:
+        print(" No valid features extracted")
+        return
 
-    if all_features:
-        df_out = pd.DataFrame(all_features)
-        df_out.to_csv(os.path.join(output_dir, "features_summary.csv"), index=False)
-        print("features_summary.csv written.")
-    else:
-        print(" No features extracted! Check cleaned files and thresholds.")
+    df_out = pd.DataFrame(all_results)
+    out_file = os.path.join(output_dir, "features_summary.csv")
+    df_out.to_csv(out_file, index=False)
+    print(f"Features saved to {out_file}")
+    return df_out
+
+
+if __name__ == "__main__":
+    extract_features()
