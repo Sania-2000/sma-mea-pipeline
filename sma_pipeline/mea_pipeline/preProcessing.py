@@ -12,8 +12,8 @@ def clean_signals():
     cfg = load_config()
 
     input_dir = cfg["input_dir"]
-    output_dir = cfg["cleaned_dir"]
-    mask_dir = cfg["artifact_mask_dir"]
+    output_dir = os.path.join(cfg["output_dir"], "cleaned")
+    mask_dir = os.path.join(cfg["output_dir"], "artifact_masks")
     plot_dir = os.path.join(cfg["output_dir"], "cleaned_plots")
 
     os.makedirs(output_dir, exist_ok=True)
@@ -35,19 +35,15 @@ def clean_signals():
 
         base = os.path.splitext(filename)[0].replace("_cleaned", "").replace("_CLEANED", "")
 
-        # Artifact detection (max across channels)
         max_signal = signals.abs().max(axis=1)
         mean = max_signal.mean()
         std = max_signal.std()
         threshold = mean + cfg["z_score_threshold"] * std
-        artifact_mask = max_signal > threshold
+        artifact_mask = (max_signal > threshold)
         print(f"  Artifacts detected: {artifact_mask.sum()} timepoints")
 
-        # Save mask
-        mask_path = os.path.join(mask_dir, f"{base}_artifact_mask.npy")
-        np.save(mask_path, artifact_mask)
+        np.save(os.path.join(mask_dir, f"{base}_artifact_mask.npy"), artifact_mask)
 
-        # Plot artifact mask
         plot_artifact_mask(
             timestamps,
             max_signal,
@@ -56,7 +52,6 @@ def clean_signals():
             os.path.join(plot_dir, f"{base}_artifact_debug.png")
         )
 
-        # Clean signal with interpolation
         cleaned_signals = signals.copy()
         for col in cleaned_signals.columns:
             cleaned_signals.loc[artifact_mask, col] = np.nan
@@ -68,14 +63,11 @@ def clean_signals():
         cleaned_df.to_csv(out_path, index=False)
         print(f"  Saved: {out_path}")
 
-        # Plot sample channels
-        s = cfg["plot_start_time"]
-        d = cfg["duration"]
-        n = cfg["downsample_factor"]
-        c = cfg["channels_per_plot"]
-
+       
+        s, d, n, c = cfg["plot_start_time"], cfg["duration"], cfg["downsample_factor"], cfg["channels_per_plot"]
         ts_window = timestamps[(timestamps >= s) & (timestamps <= s + d)][::n]
         signals_window = cleaned_signals[(timestamps >= s) & (timestamps <= s + d)].iloc[::n]
+
         plot_multi_channel_signals(
             ts_window,
             signals_window.iloc[:, :c],
