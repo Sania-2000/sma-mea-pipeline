@@ -1,6 +1,6 @@
 import os
-import re
 import pandas as pd
+import numpy as np
 import yaml
 from mea_pipeline.plotting import plot_snr_bar
 
@@ -8,67 +8,42 @@ def load_config():
     with open("config/config.yaml", "r") as f:
         cfg = yaml.safe_load(f)
         cfg["noise_threshold"] = float(cfg["noise_threshold"])
-        cfg["max_valid_snr"] = float(cfg["max_valid_snr"])
-        cfg["spike_threshold_multiplier"] = float(cfg["spike_threshold_multiplier"])
         return cfg
-
-def extract_val(pattern, line):
-    m = re.search(pattern, line)
-    return float(m.group(1)) if m else None
 
 def compute_snr():
     cfg = load_config()
-    spike_dir = os.path.join("output", "spike", "data")
-    out_dir = os.path.join("output", "snr")
-    plot_dir = os.path.join(out_dir, "plots")
-    os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(plot_dir, exist_ok=True)
+    input_dir = os.path.join(cfg["output_dir"], "cleaned")
+    output_dir = os.path.join(cfg["output_dir"], "snr")
+    os.makedirs(output_dir, exist_ok=True)
 
-    for chunk in sorted(f.replace("_spikes_raw.txt", "") for f in os.listdir(spike_dir) if f.endswith("_spikes_raw.txt")):
-        spikes_file = os.path.join(spike_dir, f"{chunk}_spikes_raw.txt")
-        raw_file = os.path.join(spike_dir, f"{chunk}_abs.csv")
-        if not os.path.exists(spikes_file) or not os.path.exists(raw_file):
+    for filename in sorted(os.listdir(input_dir)):
+        if not filename.endswith("_cleaned.csv"):
             continue
 
-        df = pd.read_csv(raw_file)
-        signal_data = df.drop(columns=["timestamps"])
-        spike_means = {}
+        filepath = os.path.join(input_dir, filename)
+        df = pd.read_csv(filepath)
+        if "timestamps" not in df.columns:
+            continue
 
-        with open(spikes_file) as f:
-            for line in f:
-                ch = re.match(r"(\S+)", line).group(1)
-                mean_spike = extract_val(r"Mean Amplitude: ([\d\.\-eE]+)", line)
-                if mean_spike is not None:
-                    spike_means[ch] = mean_spike
+        signals = df.drop(columns=["timestamps"])
+        snr_results = []
 
-        rows = []
-        for ch in spike_means:
-            if ch not in signal_data.columns:
-                continue
-            signal = signal_data[ch]
-            noise = signal.copy()
-            thresh = signal.mean() + cfg["spike_threshold_multiplier"] * signal.std()
-            noise[signal > thresh] = None
-            noise_mean = noise.abs().dropna().mean()
-            if pd.isna(noise_mean) or noise_mean < cfg["noise_threshold"]:
-                continue
-            snr = spike_means[ch] / noise_mean
-            if snr > cfg["max_valid_snr"]:
-                continue
-            rows.append({
-                "chunk": chunk, "channel": ch,
-                "mean_spike": spike_means[ch],
-                "mean_noise": noise_mean,
-                "SNR": snr
-            })
+        for col in signals.columns:
+            signal = signals[col]
+            noise_std = signal[signal.abs() < cfg["noise_threshold"]].std()
+            signal_max = signal.max()
+            snr = signal_max / noise_std if noise_std != 0 else 0.0
+            snr_results.append((col, snr))
 
-        snr_csv_path = os.path.join(out_dir, f"{chunk}_snr.csv")
+        base = os.path.splitext(filename)[0]
 
-        if rows:
-            df_out = pd.DataFrame(rows)
-            df_out.to_csv(snr_csv_path, index=False)
-            plot_snr_bar(df_out, chunk, os.path.join(plot_dir, f"{chunk}_snr.png"))
-        else:
-            print(f"[Info] No valid SNR rows for {chunk}.")
-            df_out = pd.DataFrame(columns=["chunk", "channel", "mean_spike", "mean_noise", "SNR"])
-            df_out.to_csv(snr_csv_path, index=False)
+     
+        out_txt = os.path.join(output_dir, f"{base}_snr.txt")
+        with open(out_txt, "w") as f:
+            for ch, snr_val in snr_results:
+                f.write(f"{ch}\tSNR: {snr_val:.3f}\n")
+        print(f"Saved SNR report: {out_txt}")
+
+        df_snr = pd.DataFrame(snr_results, columns=["channel", "SNR"])
+        out_png = os.path.join(output_dir, f"{base}_snr.png")
+        plot_snr_bar(df_snr, base, out_png)
